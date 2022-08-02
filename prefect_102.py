@@ -1,16 +1,39 @@
 import json
-import requests
+from datetime import datetime, timedelta
+from pathlib import Path
+import json
+import boto3
+import os
 import pandas as pd
-from datetime import datetime
-from prefect import task, Flow
+from prefect import task, Flow, Parameter
+from typing import Union
+from prefect.schedules import IntervalSchedule
+from io import StringIO, BufferedIOBase
+
+s3 = boto3.resource("s3")
+source_folder = "unprocessed/"
+s3_destination = "processed/"
+destination_folder = Path("local")
+destination_folder.mkdir(exist_ok=True, parents=True)
+extracted_folder = Path("extracted")
+extracted_folder.mkdir(exist_ok=True, parents=True)
+my_bucket = s3.Bucket("sams-bucket-garlic-aioli")
+
+for obj in my_bucket.objects.filter(Prefix=source_folder):
+    if obj.key.endswith("/"):
+        continue
+    obj_content = obj.get()
+    decoded = json.loads(obj_content["Body"].read().decode())
+    my_bucket.download_file(obj.key, (destination_folder / Path(obj.key).name).as_posix())
 
 
-@task
-def extract(url: str) -> dict:
-    res = requests.get(url)
+@task(max_retries=10, retry_delay=timedelta(seconds=10))
+def extract(input_file: Union[Path, str]) -> dict:
+    res = open(input_file, "r")
+    res_load = json.loads(res.read())
     if not res:
         raise Exception('No data fetched!')
-    return json.loads(res.content)
+    return res_load
 
 
 @task
@@ -29,14 +52,48 @@ def transform(data: dict) -> pd.DataFrame:
     return pd.DataFrame(transformed)
 
 
-@task
+@task(max_retries=3, retry_delay=timedelta(minutes=1))
 def load(data: pd.DataFrame, path: str) -> None:
     data.to_csv(path_or_buf=path, index=False)
 
 
-with Flow(name='simple_etl_pipeline') as flow:
-    users = extract(url='https://jsonplaceholder.typicode.com/users')
-    df_users = transform(users)
-    load(data=df_users, path=f'{int(datetime.now().timestamp())}.csv')
+# scheduler = IntervalSchedule(
+#     interval=timedelta(seconds=5)
+# )
 
-flow.run()
+# scheduler = CronSchedule(
+#     cron='* * * * *'
+# )
+
+@task
+def upload_s3(obj_: pd.DataFrame, remote_path: str):
+    with StringIO() as buf:
+        obj_.to_csv(path_or_buf=buf)
+        buf.seek(0)
+        my_bucket.Object(remote_path).put(Body=buf.getvalue())
+
+
+def prefect_flow():
+    with Flow(name='simple_etl_pipeline') as flow:
+        parsing_path = f'{os.getcwd()}\\{destination_folder}'
+        files = os.listdir(parsing_path)
+        for file in files:
+            file_name = file.split('.')[0]
+            users = extract(f"{parsing_path}\\{file}")
+            df_users = transform(users)
+            load(data=df_users,
+                 path=f'{os.getcwd()}\\{extracted_folder}\\{file_name}_parsed_{int(datetime.now().timestamp())}.csv')
+            upload_s3(df_users, f"processed/{file_name}_parsed_{int(datetime.now().timestamp())}.csv")
+    return flow
+
+
+if __name__ == '__main__':
+    flow = prefect_flow()
+    flow.run()
+
+# # register flow with Prefect Cloud
+#     flow.register(project_name="prefect_demo")
+#
+#
+# # start the agent
+#     flow.run_agent(token="pcu_mBIb2VIjj1MWxoWWrUkYglh3CRfE9E2Blczr")

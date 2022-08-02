@@ -1,1 +1,5 @@
 prefect==1.2.4
+requests~=2.25.1
+pandas~=1.0.3
+boto3~=1.17.98
+pydantic~=1.9.1
