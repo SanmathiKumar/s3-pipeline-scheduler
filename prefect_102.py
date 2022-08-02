@@ -10,7 +10,11 @@ from typing import Union
 from prefect.schedules import IntervalSchedule
 from io import StringIO, BufferedIOBase
 
-s3 = boto3.resource("s3")
+AWS_KEY = os.getenv("AWS_KEY")
+AWS_SECRET = os.getenv("AWS_SECRET")
+
+s3 = boto3.resource("s3", aws_access_key_id=AWS_KEY,
+                    aws_secret_access_key=AWS_SECRET, )
 source_folder = "unprocessed/"
 s3_destination = "processed/"
 destination_folder = Path("local")
