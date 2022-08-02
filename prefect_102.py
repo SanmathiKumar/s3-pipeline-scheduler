@@ -79,15 +79,13 @@ def upload_s3(obj_: pd.DataFrame, remote_path: str):
 
 def prefect_flow():
     with Flow(name='simple_etl_pipeline') as flow:
-        parsing_path = f'{os.getcwd()}\\{destination_folder}'
-        files = os.listdir(parsing_path)
+        files = destination_folder.glob("*.*")
         for file in files:
-            file_name = file.split('.')[0]
-            users = extract(f"{parsing_path}\\{file}")
+            users = extract(file)
             df_users = transform(users)
             load(data=df_users,
-                 path=f'{os.getcwd()}\\{extracted_folder}\\{file_name}_parsed_{int(datetime.now().timestamp())}.csv')
-            upload_s3(df_users, f"processed/{file_name}_parsed_{int(datetime.now().timestamp())}.csv")
+                 path=f'{os.getcwd()}\\{extracted_folder}\\{file.stem}_parsed_{int(datetime.now().timestamp())}.csv')
+            upload_s3(df_users, f"processed/{file.stem}_parsed_{int(datetime.now().timestamp())}.csv")
     return flow
 
 
